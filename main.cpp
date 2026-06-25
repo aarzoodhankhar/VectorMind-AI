@@ -17,6 +17,7 @@
 #include <climits>
 
 static const int DIMS = 16;   // demo vectors
+const std::string DOC_STORE_FILE = "documents.txt";
 // Doc embeddings dimension is determined at runtime from Ollama's model output
 
 // =====================================================================
@@ -444,7 +445,32 @@ std::string jS(const std::string& s) {
     }
     return o + '"';
 }
+std::string escapeLine(const std::string& s) {
+    std::string out;
+    for (char c : s) {
+        if (c == '\n') out += "\\n";
+        else if (c == '|') out += "\\p";
+        else if (c == '\\') out += "\\\\";
+        else out += c;
+    }
+    return out;
+}
 
+std::string unescapeLine(const std::string& s) {
+    std::string out;
+    for (int i = 0; i < (int)s.size(); i++) {
+        if (s[i] == '\\' && i + 1 < (int)s.size()) {
+            char next = s[i + 1];
+            if (next == 'n') { out += '\n'; i++; }
+            else if (next == 'p') { out += '|'; i++; }
+            else if (next == '\\') { out += '\\'; i++; }
+            else out += s[i];
+        } else {
+            out += s[i];
+        }
+    }
+    return out;
+}
 std::string jVec(const std::vector<float>& v) {
     std::ostringstream ss; ss << '[';
     for (size_t i = 0; i < v.size(); i++) {
@@ -709,7 +735,65 @@ public:
 
     int getDims() { return dims; }
 };
+void saveDocuments(DocumentDB& docDB) {
+    std::ofstream out(DOC_STORE_FILE);
 
+    auto docs = docDB.all();
+
+    for (auto& d : docs) {
+        out << d.id << "|"
+            << escapeLine(d.title) << "|"
+            << escapeLine(d.text) << "|";
+
+        for (size_t i = 0; i < d.emb.size(); i++) {
+            if (i) out << ",";
+            out << d.emb[i];
+        }
+
+        out << "\n";
+    }
+}
+void loadDocuments(DocumentDB& docDB) {
+    std::ifstream in(DOC_STORE_FILE);
+
+    if (!in.is_open()) return;
+
+    std::string line;
+
+    while (std::getline(in, line)) {
+
+        size_t p1 = line.find('|');
+        size_t p2 = line.find('|', p1 + 1);
+        size_t p3 = line.find('|', p2 + 1);
+
+        if (p1 == std::string::npos ||
+            p2 == std::string::npos ||
+            p3 == std::string::npos)
+            continue;
+
+        std::string title =
+            unescapeLine(line.substr(p1 + 1, p2 - p1 - 1));
+
+        std::string text =
+            unescapeLine(line.substr(p2 + 1, p3 - p2 - 1));
+
+        std::string embStr =
+            line.substr(p3 + 1);
+
+        std::vector<float> emb;
+
+        std::stringstream ss(embStr);
+        std::string token;
+
+        while (std::getline(ss, token, ',')) {
+            emb.push_back(std::stof(token));
+        }
+
+        if (!emb.empty()) {
+            docDB.insert(title, text, emb);
+        }
+    }
+}
 // =====================================================================
 //  DEMO DATA  (16D categorical vectors)
 // =====================================================================
@@ -767,7 +851,8 @@ int main() {
     VectorDB   db(DIMS);
     DocumentDB docDB;
     OllamaClient ollama;
-
+    loadDocuments(docDB);
+    // std::cout << "Loaded docs from file: " << docDB.size() << std::endl;
     loadDemo(db);
 
     // Check Ollama at startup (non-fatal)
@@ -928,7 +1013,7 @@ int main() {
                 : title;
             ids.push_back(docDB.insert(chunkTitle, chunks[i], emb));
         }
-
+        saveDocuments(docDB);
         std::ostringstream ss;
         ss << "{\"ids\":[";
         for (size_t i = 0; i < ids.size(); i++) { if (i) ss << ','; ss << ids[i]; }
