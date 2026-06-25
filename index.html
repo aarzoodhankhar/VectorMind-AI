@@ -280,7 +280,9 @@ button {
         <div style="display:flex;flex-direction:column;gap:8px">
           <input type="text" id="docTitle" placeholder="Document title / topic…" />
           <textarea id="docText" placeholder="Paste your notes, textbook excerpt, lecture content…&#10;&#10;Long text is automatically split into overlapping chunks and each chunk gets its own real embedding via Ollama's nomic-embed-text model."></textarea>
-          <button class="btn-g" id="insertDocBtn" onclick="insertDocument()">⚡ EMBED &amp; INSERT</button>
+          <input type="file" id="pdfFile" accept=".pdf" />
+          <button class="btn-s" onclick="insertPdf()">📄 UPLOAD PDF</button>
+          <button class="btn-g" id="insertDocBtn" onclick="insertDocument()">⚡ EMBED TEXT</button>
           <div id="insertStatus" style="font-size:11px;color:var(--muted)"></div>
         </div>
       </div>
@@ -697,9 +699,23 @@ async function insertDocument() {
   } catch(_) {
     status.innerHTML='<span style="color:var(--red)">✗ Server error</span>';
   }
-  btn.disabled=false; btn.textContent='⚡ EMBED & INSERT';
+  btn.disabled=false; btn.textContent='⚡ EMBED TEXT';
 }
+async function insertPdf() {
+  const fileInput = document.getElementById('pdfFile');
+  const status = document.getElementById('insertStatus');
 
+  if (!fileInput.files.length) {
+    status.innerHTML = '<span style="color:var(--red)">✗ Please select a PDF first.</span>';
+    return;
+  }
+
+  const file = fileInput.files[0];
+
+  status.innerHTML =
+    `<span style="color:var(--green)">✓ Selected PDF: ${file.name}</span><br>` +
+    `<span style="color:var(--muted)">Next step: connect browser upload to backend.</span>`;
+}
 async function loadDocList() {
   try {
     const r=await fetch(API+'/doc/list'), docs=await r.json();
