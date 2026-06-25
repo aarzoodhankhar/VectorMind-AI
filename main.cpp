@@ -15,7 +15,8 @@
 #include <functional>
 #include <fstream>
 #include <climits>
-
+#include <cstdio>
+#include <filesystem>
 static const int DIMS = 16;   // demo vectors
 const std::string DOC_STORE_FILE = "documents.txt";
 // Doc embeddings dimension is determined at runtime from Ollama's model output
@@ -1022,6 +1023,67 @@ int main() {
         res.set_content(ss.str(), "application/json");
     });
 
+    svr.Post("/pdf/insert", [&](const httplib::Request& req, httplib::Response& res) {
+    cors(res);
+
+    auto title = extractStr(req.body, "title");
+    auto path  = extractStr(req.body, "path");
+
+    if (title.empty() || path.empty()) {
+        res.set_content("{\"error\":\"need title and path\"}", "application/json");
+        return;
+    }
+
+    std::string command = "python extract_pdf.py \"" + path + "\"";
+    FILE* pipe = _popen(command.c_str(), "r");
+
+    if (!pipe) {
+        res.set_content("{\"error\":\"failed to run PDF extractor\"}", "application/json");
+        return;
+    }
+
+    char buffer[4096];
+    std::string text;
+
+    while (fgets(buffer, sizeof(buffer), pipe) != nullptr) {
+        text += buffer;
+    }
+
+    _pclose(pipe);
+
+    if (text.empty()) {
+        res.set_content("{\"error\":\"no text extracted from PDF\"}", "application/json");
+        return;
+    }
+
+    auto chunks = chunkText(text, 250, 30);
+    std::vector<int> ids;
+
+    for (int i = 0; i < (int)chunks.size(); i++) {
+        auto emb = ollama.embed(chunks[i]);
+
+        if (emb.empty()) {
+            res.set_content("{\"error\":\"Ollama unavailable\"}", "application/json");
+            return;
+        }
+
+        std::string chunkTitle = title + " [PDF " + std::to_string(i + 1) + "/" + std::to_string(chunks.size()) + "]";
+        ids.push_back(docDB.insert(chunkTitle, chunks[i], emb));
+    }
+
+    saveDocuments(docDB);
+
+    std::ostringstream ss;
+    ss << "{\"ids\":[";
+    for (size_t i = 0; i < ids.size(); i++) {
+        if (i) ss << ",";
+        ss << ids[i];
+    }
+    ss << "],\"chunks\":" << chunks.size()
+       << ",\"dims\":" << docDB.getDims() << "}";
+
+    res.set_content(ss.str(), "application/json");
+});
     // DELETE /doc/delete/123
     svr.Delete(R"(/doc/delete/(\d+))", [&](const httplib::Request& req, httplib::Response& res) {
         cors(res);

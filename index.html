@@ -280,8 +280,8 @@ button {
         <div style="display:flex;flex-direction:column;gap:8px">
           <input type="text" id="docTitle" placeholder="Document title / topic…" />
           <textarea id="docText" placeholder="Paste your notes, textbook excerpt, lecture content…&#10;&#10;Long text is automatically split into overlapping chunks and each chunk gets its own real embedding via Ollama's nomic-embed-text model."></textarea>
-          <input type="file" id="pdfFile" accept=".pdf" />
-          <button class="btn-s" onclick="insertPdf()">📄 UPLOAD PDF</button>
+          <input type="text" id="pdfPath" placeholder="Paste full PDF path e.g. C:\Users\aarzo\Downloads\file.pdf" />
+          <button class="btn-s" onclick="insertPdf()">📄 INSERT PDF</button>
           <button class="btn-g" id="insertDocBtn" onclick="insertDocument()">⚡ EMBED TEXT</button>
           <div id="insertStatus" style="font-size:11px;color:var(--muted)"></div>
         </div>
@@ -702,19 +702,40 @@ async function insertDocument() {
   btn.disabled=false; btn.textContent='⚡ EMBED TEXT';
 }
 async function insertPdf() {
-  const fileInput = document.getElementById('pdfFile');
+  const path = document.getElementById('pdfPath').value.trim();
   const status = document.getElementById('insertStatus');
 
-  if (!fileInput.files.length) {
-    status.innerHTML = '<span style="color:var(--red)">✗ Please select a PDF first.</span>';
+  if (!path) {
+    status.innerHTML = '<span style="color:var(--red)">✗ Please paste full PDF path.</span>';
     return;
   }
 
-  const file = fileInput.files[0];
+  const filename = path.split('\\').pop();
+  status.innerHTML = '<span style="color:var(--muted)">Extracting and embedding PDF...</span>';
 
-  status.innerHTML =
-    `<span style="color:var(--green)">✓ Selected PDF: ${file.name}</span><br>` +
-    `<span style="color:var(--muted)">Next step: connect browser upload to backend.</span>`;
+  try {
+    const r = await fetch(API + '/pdf/insert', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({
+        title: filename,
+        path: path.replaceAll('\\', '\\\\')
+      })
+    });
+
+    const d = await r.json();
+
+    if (d.error) {
+      status.innerHTML = `<span style="color:var(--red)">✗ ${d.error}</span>`;
+    } else {
+      status.innerHTML = `<span style="color:var(--green)">✓ Inserted ${d.chunks} PDF chunk(s) · ${d.dims}D embeddings</span>`;
+      document.getElementById('pdfPath').value = '';
+      loadDocList();
+      checkOllamaStatus();
+    }
+  } catch (e) {
+    status.innerHTML = '<span style="color:var(--red)">✗ PDF insert failed.</span>';
+  }
 }
 async function loadDocList() {
   try {
